@@ -1,3 +1,6 @@
+# Custom part
+cfg_secret_configuration.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
