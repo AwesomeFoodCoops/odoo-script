@@ -7,8 +7,10 @@ import erppeek
 
 from cfg_secret_configuration import odoo_configuration_user
 
-
+# TODO BEFORE RUNNING THIS SCIRPT
 #ALTER TABLE pos_order ADD COLUMN amount_total numeric; COMMENT ON COLUMN pos_order.amount_total IS 'Total Amount';
+# modify pos.order.line model to store price_subtotal_incl
+# https://github.com/shewolfParis/odoo-production/pull/154/files
 
 ###############################################################################
 # Odoo Connection
@@ -32,7 +34,7 @@ openerp, uid, tz = init_openerp(
 ###############################################################################
 
 # Quantity of moves to batch at the same time
-QTY_TO_BATCH = 1000
+QTY_TO_BATCH = 10
 
 # Pause duration between two batches
 SLEEP_TIME = 0.0
@@ -40,28 +42,23 @@ SLEEP_TIME = 0.0
 ###############################################################################
 # Script
 ###############################################################################
-###############################################################################
-# Script
-###############################################################################
-    
-print "Found %d orders to compute" % (
-    openerp.count('pos.order', [('amount_total', '=', False)]))
+
+t = openerp.count('pos.order', [('amount_total', '=', False)])
+print "Found %d orders to compute" % (t)
 
 count = 0
-    
+
 while openerp.count('pos.order', [('amount_total', '=', False)]) > 0:
-    print "%s : Manage %d - %d orders." % (
-        str(datetime.datetime.today()), count, count + QTY_TO_BATCH)
+    print "%s : Manage %d - %d orders (%d p.c.)" % (
+        str(datetime.datetime.today()), count, count + QTY_TO_BATCH, count/(t/100.0))
     order_ids = openerp.search(
         'pos.order', [('amount_total', '=', False)], limit=QTY_TO_BATCH)
     orders = openerp.PosOrder.browse([('id', 'in', order_ids)])
     for order in orders:
         currency = order.pricelist_id.currency_id
-        amount_untaxed = 0.0
+        total = 0.0
         for line in order.lines :
-            print line.price_subtotal()
-        amount_untaxed = currency.round(amount_untaxed)
-        order.amount_total = currency.round(
-            order.amount_tax + amount_untaxed)
+            total += line.price_subtotal_incl
+        order.amount_total = total
     count += QTY_TO_BATCH
     time.sleep(SLEEP_TIME)
