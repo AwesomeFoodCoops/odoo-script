@@ -62,3 +62,7 @@ while openerp.count('pos.order', [('amount_total', '=', False)]) > 0:
         order.amount_total = total
     count += QTY_TO_BATCH
     time.sleep(SLEEP_TIME)
+
+# if we can't call the currency rounding operation on the fly, we can execute an SQL rounding afterwards    
+# SELECT count(*), length(cast ("amount_total" as text)) as digit_number FROM "public"."pos_order" GROUP BY digit_number
+# UPDATE "public"."pos_order" SET "amount_total" = ROUND("amount_total", 2)
