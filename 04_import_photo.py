@@ -36,10 +36,10 @@ def send_image(liste, folder_path,bool_assoc):
     print "number of objects in folder path : ", len(listdir(folder_path))
     count = 0
     for m in liste :
-            file_path = folder_path+str(m.ref)+".JPG"
+            file_path = folder_path+str(m.barcode_base)+".JPG"
             if bool_assoc :
-                file_path = folder_path+str(m.parent_id.ref)+".JPG"
-            print file_path
+                file_path = folder_path+str(m.parent_id.barcode_base)+".JPG"
+            print file_path, m.name
             if os.path.isfile(file_path):
                 with open(file_path, "rb") as image_file:
                     encoded_string = base64.b64encode(image_file.read())
