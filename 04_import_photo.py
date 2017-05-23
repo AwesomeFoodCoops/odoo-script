@@ -29,24 +29,17 @@ openerp, uid, tz = init_openerp(
 
 
 ###############################################################################
-# Configuration
-###############################################################################
-
-# Quantity of moves to batch at the same time
-QTY_TO_BATCH = 10
-
-# Pause duration between two batches
-SLEEP_TIME = 0.0
-
-###############################################################################
 # Script
 ###############################################################################
 
-def send_image(liste, folder_path):
+def send_image(liste, folder_path,bool_assoc):
     print "number of objects in folder path : ", len(listdir(folder_path))
     count = 0
     for m in liste :
-            file_path = folder_path+"/"+str(m.ref)+".JPG"
+            file_path = folder_path+str(m.ref)+".JPG"
+            if bool_assoc :
+                file_path = folder_path+str(m.parent_id.ref)+".JPG"
+            print file_path
             if os.path.isfile(file_path):
                 with open(file_path, "rb") as image_file:
                     encoded_string = base64.b64encode(image_file.read())
@@ -66,7 +59,7 @@ associated_poeple = openerp.ResPartner.browse([('id', 'in', associated_people_id
 members = openerp.ResPartner.browse([('id', 'in', members_ids)])
 
 print ">>>>>>>> Number of members people found: ", len(members)
-send_image(members, "/Users/adumaine/Downloads/valides/cooperateurs/")
+send_image(members, "/home/louve-erp-dev/photos/cooperateurs/", False)
 
 print ">>>>>>>> Number of associated people found: ", len(associated_people)
-send_image(associated_people, "~/Downloads/valides/rattaches")
+send_image(associated_people, "/home/louve-erp-dev/photos/rattaches", True)
