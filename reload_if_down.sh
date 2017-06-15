@@ -1,3 +1,6 @@
+# this script is launched every 5 minutes by a system cron
+#*/5 * * * * bash /home/louve-erp-dev/reload_if_down.sh >> /home/louve-erp-dev/reload_if_down.log
+
 USER=$(whoami)
 ##########
 
