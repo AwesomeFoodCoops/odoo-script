@@ -40,7 +40,7 @@ def correct_capital_payement():
     #id_journal_cheque_souscription = 77
 
     for invoice in invoices:
-        print "===========================================", invoice.number
+        print "===========================================", invoice.number, invoice.partner_id
         #payment_cap_member = openerp.AccountPayment.browse([('partner_id','=',invoice.partner_id.id),('journal_id','=',id_journal_cheque_souscription)])
         payment_cap_member = openerp.AccountPayment.browse([('partner_id','=',invoice.partner_id.id)])
 
@@ -57,9 +57,9 @@ def correct_capital_payement():
             print "       >>>> ", payment, payment.partner_id
 
             ####### VERIFIER QU'ON NE MODIFIE PAS UN PAIMENT BON !
-            print "       ", "Nb factures liées", len(payment.invoice_ids)
+            #print "       ", "Nb factures liées", len(payment.invoice_ids)
             if (len(payment.invoice_ids)>0):
-                print "       ", "Factures présentes, ne pas déletrer ce paiement."
+                print "       ", "Factures présentes, ne pas délettrer ce paiement."
                 if (payment.state == 'draft'):
                     print "       ", "Ce paiement a simplement été confirmé."
                     try:
@@ -72,9 +72,8 @@ def correct_capital_payement():
             for ecriture in payment.move_line_ids :
                 print "              >>>> ",ecriture
                 if (ecriture.reconciled):
-                    print "              ","==> Écriture réconciliée"
                     ecriture.remove_move_reconcile()
-                    print "              ","==> Suppression du lettrage"
+                    print "              ","==> Annulation du lettrage"
 
             # ANNULER LE PAIEMENT
             if (payment.state != "draft"):
