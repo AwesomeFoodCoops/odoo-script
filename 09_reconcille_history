@@ -4,6 +4,7 @@ import erppeek
 import sys
 from config_test import odoo_configuration_user
 import datetime
+import re
 
 ###############################################################################
 # Odoo Connection
@@ -53,16 +54,16 @@ def already_reconcilled(move_lines):
 
 def reconcile_pos():
     print ">>>>>>> START UPDATING >>>>>>>>>>"
-    CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-04-01"),('date', '<', "2017-04-25"),('journal_id', 'in', id_journaux_CB0X)])
+    CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-04-01"),('date', '<', "2017-04-03"),('journal_id', 'in', id_journaux_CB0X)])
 
     for statement in CB0Xstatements:
         print "Avancement : ", total_ok+plusieurs_possibilites+aucune_possibilite, " / ", len(CB0Xstatements)
         print "       => total_ok", total_ok, "plusieurs_possibilites", plusieurs_possibilites, "aucune_possibilite", aucune_possibilite 
         print "===========================================", statement.name, " / ", statement.date
 
-	if (already_reconcilled(statement.move_line_ids) == True):
-                print "    => Une des écritures de ce bank statement est déjà lettrée => abandon"
-		continue
+        if (already_reconcilled(statement.move_line_ids) == True):
+            print "    => Une des écritures de ce bank statement est déjà lettrée => abandon"
+            continue
 
         account_id_credit = statement.journal_id.default_credit_account_id.id
         account_id_debit = statement.journal_id.default_debit_account_id.id
@@ -70,12 +71,36 @@ def reconcile_pos():
         if res != False :
             res_contact, res_contactless = res
             #if (res_contact != False):
-                # move_contact = rapprochement(statement,res_contact,account_id_credit)
+            #    move_contact = rapprochement(statement,res_contact,account_id_credit, "CB classique")
             #if (res_contactless != False):
-                # move_contactless = rapprochement(statement,res_contactless,account_id_credit)
-            #lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit,move_contact,move_contactless)
-            #generer_lettrer_frais_bancaires
-#        exit()
+            #    move_contactless = rapprochement(statement,res_contactless,account_id_credit, "CB sans contact")
+            #lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
+            generer_lettrer_frais_bancaires(res_contactless,"8815598")
+            generer_lettrer_frais_bancaires(res_contact,"8815597")
+        exit()
+
+def generer_lettrer_frais_bancaires(statement,contract_number):
+    parse_name = re.compile(u"^CB LA LOUVE          (?P<date>\d{6})$").search(statement.name)
+    parse_note = re.compile(u"^CONTRAT "+contract_number+"     REM (?P<rem>\d{5})$").search(statement.note)
+    name = "*CB COM LA LOUVE "+parse_name.group('date')
+    note = "CONTRAT "+contract_number+" REM "+parse_note.group('rem')
+    fees_lines = openerp.AccountBankStatementLine.browse([('name','=',name),('note','=',note),('journal_id','=',id_journal_CEP),('date', '=', statement.date)])
+    if len(fees_lines) == 0:
+        print "Aucune ligne de frais trouvée pour cette ligne de télécollecte"
+        return False
+    if len(fees_lines) > 1:
+        print "Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
+    fees_line = fees_lines[0]
+
+    move_line_data_credit = {
+        'name': 'Frais télécollecte Contrat '+contract_number+" REM "+parse_note.group('rem'),
+        'debit': fees_line.amount * -1,
+        'credit': 0.0,
+        'journal_id': id_journal_CEP,
+        'date': fees_line.date,
+        'account_id': 506,#correspond au compte 627800 Autres frais et commissions sur prestations de services
+    }
+    print fees_line.process_reconciliation_wrapper([move_line_data_credit])
 
 def trouver_ligne(statement):
     global total_ok
@@ -89,6 +114,9 @@ def trouver_ligne(statement):
 
     for line in bsl:
 #            print line.name, line.note, line.amount, line.name.find(pattern_telecollecte), line.note.find(contact_contract_number), line.note.find(contactless_contract_number)
+        if len(line.journal_entry_ids)>0:
+            print "Déjà réconciliée"
+            continue
         if (line.name.find(pattern_telecollecte)==0 and line.note.find(contact_contract_number)==0):
             contact_lines.append(line)
         if (line.name.find(pattern_telecollecte)==0 and line.note.find(contactless_contract_number)==0):
@@ -149,43 +177,46 @@ def trouver_ligne(statement):
     return res_contact,res_contactless
 
 
-def rapprochement(statement,bank_line,account_id_credit):
+def rapprochement(statement,bank_line,account_id_credit,mode):
         move_line_contact = {
-                'name': 'Télecollecte avec contact '+statement.journal_id.name+' '+statement.date+' '+statement.name,
+                'name': 'Télecollecte '+mode+' '+statement.journal_id.name+' '+statement.date+' '+statement.name,
                 'debit': 0.0,
                 'credit': abs(bank_line.amount),
                 'journal_id': id_journal_CEP,
                 'date': statement.date,
                 'account_id': account_id_credit,
                 }
-        res = bank_line.process_reconciliation([move_line_contact])
-        #res = bank_line.process_reconciliation([], [], [move_line_contact])
+        res = bank_line.process_reconciliation_wrapper([move_line_contact])
         print res
         return res
 
 
-def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit,move_contact,move_contactless):
+def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit):
         # LETTRER
         line_to_reconcil = []
+        print "acc id credit", account_id_credit
 
-        for move in statement.move_line_ids:
-            if move.account_id.id == account_id_debit and move.id not in line_to_reconcil:
-                line_to_reconcil.append(move.id)
+        for move_line in statement.move_line_ids:
+            if move_line.account_id.id == account_id_debit and move_line.id not in line_to_reconcil:
+                line_to_reconcil.append(move_line.id)
 
+        print len(line_to_reconcil), line_to_reconcil
         # => move_contactless
-        for move in res_contactless.journal_entry_ids.line_ids:
-            if move.account_id.id == account_id_credit and move.id not in line_to_reconcil:
-                line_to_reconcil.append(move.id)
+        for move_line in res_contactless.journal_entry_ids[0].line_ids:
+            print move_line.account_id.id
+            if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
+                line_to_reconcil.append(move_line.id)
 
+        print len(line_to_reconcil), line_to_reconcil
         # => move_contact
-        for move in res_contact.journal_entry_ids.line_ids:
-            if move.account_id.id == account_id_credit and move.id not in line_to_reconcil:
-                line_to_reconcil.append(move.id)
+        for move_line in res_contact.journal_entry_ids[0].line_ids:
+            print move_line.account_id.id
+            if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
+                line_to_reconcil.append(move_line.id)
 
-        print line_to_reconcil
-#        r = openerp.AccountMoveLineReconcile.with_context(active_ids=line_to_reconcil)
-#        r.trans_rec_reconcile_full()
-        r = openerp.AccountMoveLineReconcile.trans_rec_reconcile_full().with_context(active_ids=line_to_reconcil)
+        print len(line_to_reconcil), line_to_reconcil
+        wizard_id = 1
+        r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
         print r
 
 
