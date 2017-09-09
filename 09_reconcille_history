@@ -24,6 +24,23 @@ openerp, uid, tz = init_openerp(
     odoo_configuration_user['password'],
     odoo_configuration_user['database'])
 
+##################################################################
+##########                  SET LOGGER                  ##########
+##################################################################
+class Logger(object):
+    def __init__(self, filename='Default.log'):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+log_file = 'log_' + datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")+'.log'
+print "stdout = ./"+log_file
+sys.stdout = Logger(log_file)
+print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
+
 ###############################################################################
 # Script
 ###############################################################################
@@ -54,7 +71,7 @@ def already_reconcilled(move_lines):
 
 def reconcile_pos():
     print ">>>>>>> START UPDATING >>>>>>>>>>"
-    CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-04-01"),('date', '<', "2017-04-03"),('journal_id', 'in', id_journaux_CB0X)])
+    CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-01-01"),('date', '<', "2017-08-31"),('journal_id', 'in', id_journaux_CB0X)])
 
     for statement in CB0Xstatements:
         print "Avancement : ", total_ok+plusieurs_possibilites+aucune_possibilite, " / ", len(CB0Xstatements)
@@ -70,16 +87,17 @@ def reconcile_pos():
         res = trouver_ligne(statement)
         if res != False :
             res_contact, res_contactless = res
-            #if (res_contact != False):
-            #    move_contact = rapprochement(statement,res_contact,account_id_credit, "CB classique")
-            #if (res_contactless != False):
-            #    move_contactless = rapprochement(statement,res_contactless,account_id_credit, "CB sans contact")
-            #lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
-            generer_lettrer_frais_bancaires(res_contactless,"8815598")
-            generer_lettrer_frais_bancaires(res_contact,"8815597")
-        exit()
+            if (res_contact != False):
+                move_contact = rapprochement(statement,res_contact,account_id_credit, "CB classique")
+                generer_lettrer_frais_bancaires(res_contact,"8815597")
+            if (res_contactless != False):
+                move_contactless = rapprochement(statement,res_contactless,account_id_credit, "CB sans contact")
+                generer_lettrer_frais_bancaires(res_contactless,"8815598")
+            lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
+        #exit()
 
 def generer_lettrer_frais_bancaires(statement,contract_number):
+    print "     > Rapporchement frais bancaires"
     parse_name = re.compile(u"^CB LA LOUVE          (?P<date>\d{6})$").search(statement.name)
     parse_note = re.compile(u"^CONTRAT "+contract_number+"     REM (?P<rem>\d{5})$").search(statement.note)
     name = "*CB COM LA LOUVE "+parse_name.group('date')
@@ -103,6 +121,7 @@ def generer_lettrer_frais_bancaires(statement,contract_number):
     print fees_line.process_reconciliation_wrapper([move_line_data_credit])
 
 def trouver_ligne(statement):
+    print "     > Trouver ligne"
     global total_ok
     global plusieurs_possibilites
     global aucune_possibilite
@@ -178,6 +197,7 @@ def trouver_ligne(statement):
 
 
 def rapprochement(statement,bank_line,account_id_credit,mode):
+        print "     > Rapprochement"
         move_line_contact = {
                 'name': 'Télecollecte '+mode+' '+statement.journal_id.name+' '+statement.date+' '+statement.name,
                 'debit': 0.0,
@@ -192,27 +212,25 @@ def rapprochement(statement,bank_line,account_id_credit,mode):
 
 
 def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit):
+        print "     > Lettrage"
         # LETTRER
         line_to_reconcil = []
-        print "acc id credit", account_id_credit
 
         for move_line in statement.move_line_ids:
             if move_line.account_id.id == account_id_debit and move_line.id not in line_to_reconcil:
                 line_to_reconcil.append(move_line.id)
 
-        print len(line_to_reconcil), line_to_reconcil
         # => move_contactless
-        for move_line in res_contactless.journal_entry_ids[0].line_ids:
-            print move_line.account_id.id
-            if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
-                line_to_reconcil.append(move_line.id)
+        if res_contactless != False :
+            for move_line in res_contactless.journal_entry_ids[0].line_ids:
+                if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
+                    line_to_reconcil.append(move_line.id)
 
-        print len(line_to_reconcil), line_to_reconcil
         # => move_contact
-        for move_line in res_contact.journal_entry_ids[0].line_ids:
-            print move_line.account_id.id
-            if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
-                line_to_reconcil.append(move_line.id)
+        if res_contact != False :
+            for move_line in res_contact.journal_entry_ids[0].line_ids:
+                if move_line.account_id.id == account_id_credit and move_line.id not in line_to_reconcil:
+                    line_to_reconcil.append(move_line.id)
 
         print len(line_to_reconcil), line_to_reconcil
         wizard_id = 1
