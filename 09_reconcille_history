@@ -56,6 +56,7 @@ total_ok = 0
 plusieurs_possibilites = 0
 aucune_possibilite = 0
 
+mode_test = True
 
 def delta_day(date, delay_day):
     date_1 = datetime.datetime.strptime(date, "%Y-%m-%d")
@@ -136,16 +137,18 @@ def reconcile_pos(statement_name=None):
                     for ecriture_banque in ecriture_cbXX_liees:
                         print "             -> Ecriture journal de banque et compte CBXX lettré avec les écritures de vente (compte CBXX du journal CBXX) : ", ecriture_banque.id
                         print "                Nombre d'écritures de la pièce de l'écriture :",len(ecriture_banque.move_id.line_ids)
+
+                        if ecriture_banque.move_id.id in pieces_deja_inspectees :
+                            print "                 Cette pièce a déjà été inspectée."
+                            continue
+                        pieces_deja_inspectees.append(ecriture_banque.move_id.id)
+
                         for ecriture_journal_banque in ecriture_banque.move_id.line_ids:
                             if ecriture_journal_banque.account_id.id != id_compte_comptable_CEP:
                                 #print "             - Pas compte de banque : ", ecriture_journal_banque.account, ecriture_journal_banque.name, ecriture_journal_banque.id
                                 continue
                             print "             -> Ecriture journal de banque et compte de banque : ", ecriture_journal_banque.id
                             print "             -> Numéro de la pièce :", ecriture_journal_banque.move_id.id
-                            if ecriture_journal_banque.move_id.id in pieces_deja_inspectees :
-                                print "                 Cette pièce a déjà été inspectée."
-                                continue
-                            pieces_deja_inspectees.append(ecriture_journal_banque.move_id.id)
                             res = trouver_ligne(ecriture_journal_banque.date,ecriture_journal_banque.debit)
                             if res != False :
                                 res_contact, res_contactless = res
@@ -157,7 +160,9 @@ def reconcile_pos(statement_name=None):
                                         print "             WARNING Niveau 2: ligne de relevé de banque (id=",ligne_releve.id, ") déjà en partie ou totalement rapprochée"
                                     else :
                                         print "         > Rapproché : ligne de relevé de banque id=",ligne_releve.id, " avec écriture du journal de banque id=",ecriture_journal_banque.id
-#                                       ligne_releve.journal_entry_ids = [ecriture_journal_banque]
+                                        if mode_test == False :
+                                            print ligne_releve.name
+                                            ligne_releve.journal_entry_ids = [ecriture_journal_banque.move_id.id]
                                         ligne_banque_cb_rapprochees.append(ligne_releve)
                                 
 
@@ -169,34 +174,36 @@ def reconcile_pos(statement_name=None):
             if res != False :
                 res_contact, res_contactless = res
                 if (res_contact != False):
-#                    move_contact = creer_ecriture_banque_et_rapprocher(statement,res_contact,account_id_credit, "CB classique")
+                    move_contact = creer_ecriture_banque_et_rapprocher(statement,res_contact,account_id_credit, "CB classique")
                     ligne_banque_cb_rapprochees.append(res_contact)
                     pass
                 if (res_contactless != False):
-#                   move_contactless = creer_ecriture_banque_et_rapprocher(statement,res_contactless,account_id_credit, "CB sans contact")
+                    move_contactless = creer_ecriture_banque_et_rapprocher(statement,res_contactless,account_id_credit, "CB sans contact")
                     ligne_banque_cb_rapprochees.append(res_contactless)
                     pass
-#               lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
+                lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
 
         #quelque soit le cas, générer l'écriture de frais bancaire et la rapprocher
         for ligne in ligne_banque_cb_rapprochees : 
-#            generer_lettrer_frais_bancaires(statement.date,ligne)
+            generer_lettrer_frais_bancaires(ligne)
             pass
 
 
-def generer_lettrer_frais_bancaires(statement_date,transaction_line):
+def generer_lettrer_frais_bancaires(transaction_line):
     print "     > Rapporchement frais bancaires"
     parse_name = re.compile(u"^CB LA LOUVE          (?P<date>\d{6})$").search(transaction_line.name)
-    parse_note = re.compile(u"^CONTRAT (?P<contract>\d{7})     REM (?P<rem>\d{5})$").search(transaction_line.note)
+    parse_note = re.compile(u"^CONTRAT (?P<contract_number>\d{7})     REM (?P<rem>\d{5})$").search(transaction_line.note)
     name = "*CB COM LA LOUVE "+parse_name.group('date')
     note = "CONTRAT "+parse_note.group('contract_number')+" REM "+parse_note.group('rem')
 
-    fees_lines = openerp.AccountBankStatementLine.browse([('name','=',name),('note','=',note),('journal_id','=',id_journal_CEP),('date', '=', statement_date)])
+    fees_lines = openerp.AccountBankStatementLine.browse([('name','=',name),('note','=',note),('journal_id','=',id_journal_CEP),('journal_entry_ids','=',False)])
     if len(fees_lines) == 0:
-        print "Aucune ligne de frais trouvée pour cette ligne de télécollecte"
+        print "WARNING Niveau 3 : Aucune ligne de frais trouvée pour cette ligne de télécollecte"
         return False
     if len(fees_lines) > 1:
-        print "WARNING Niveau 2 : Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
+        print "WARNING Niveau 3 : Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
+        return False
+
     fees_line = fees_lines[0]
 
     move_line_data_credit = {
@@ -208,7 +215,9 @@ def generer_lettrer_frais_bancaires(statement_date,transaction_line):
         'account_id': 504,#correspond au compte comptable 627500 Frais Comm /CB
     }
     print "         -> ligne de banque générée : ", move_line_data_credit
-    print fees_line.process_reconciliation_wrapper([move_line_data_credit])
+    if mode_test == False :
+        print fees_line.process_reconciliation_wrapper([move_line_data_credit])
+    return True
 
 def trouver_ligne(date_session,total_amount):
     print "     > Trouver ligne"
@@ -303,7 +312,7 @@ def trouver_ligne(date_session,total_amount):
 def creer_ecriture_banque_et_rapprocher(statement,bank_line,account_id_credit,mode):
         print "     > Création de l'écriture de branque et rapprochement"
         print "         - Relevé CBxx de POS : ",statement.name, statement.id
-        print "         - Ligne de relevé de banque : ",bank_line.name, bank.line.id
+        print "         - Ligne de relevé de banque : ",bank_line.name, bank_line.id
         move_line_contact = {
                 'name': 'Télecollecte '+mode+' '+statement.journal_id.name+' '+statement.date+' '+statement.name,
                 'debit': 0.0,
@@ -312,9 +321,11 @@ def creer_ecriture_banque_et_rapprocher(statement,bank_line,account_id_credit,mo
                 'date': statement.date,
                 'account_id': account_id_credit,
                 }
-        res = bank_line.process_reconciliation_wrapper([move_line_contact])
         print move_line_contact
-        return res
+
+        if mode_test == False :
+            res = bank_line.process_reconciliation_wrapper([move_line_contact])
+            return res
 
 
 def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit):
@@ -340,12 +351,45 @@ def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_
 
         print "         ->", len(line_to_reconcil), "lignes à lettrer portant les id : ", line_to_reconcil
         wizard_id = 1
-        r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
-        print r
+        if mode_test == False :
+            r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
+            print r
 
 
-reconcile_pos()
-#reconcile_pos("CB04/2017/0089")
+def generer_toutes_ecritures_frais(date_debut, date_fin):
+    # fonction de test
+    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
+    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
+    print len(contact_lines), len(contactless_lines)
+    c = 0
+    c_ok=0
+    for i in contact_lines:
+        print "=============================="
+        print "contact :",c," / ",len(contact_lines)
+        print "     c_ok : ", c_ok, " / ",c
+        print "=============================="
+        if generer_lettrer_frais_bancaires(i)==True:
+            c_ok = c_ok+1
+        c = c+1
+    sc=0
+    sc_pk=0
+    for j in contactless_lines:
+        print "=============================="
+        print "contact :",c," / ",len(contact_lines)
+        print "     c_ok : ", c_ok, " / ",c
+        print "sans contact :",sc," / ",len(contactless_lines)
+        print "     sc_ok : ", sc_ok, " / ",sc
+        print "=============================="
+        if generer_lettrer_frais_bancaires(j)==True:
+            sc_ok = sc_ok+1
+        sc = sc+1
+ 
+
+#reconcile_pos()
+#reconcile_pos("CB04/2017/0002")
 #trouver_ligne("2017-01-05",142.42)
+
+generer_toutes_ecritures_frais('2017-01-01','2017-04-30')
+
 print "\n>>>>>>> DONE >>>>>>>>>>"
 print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
