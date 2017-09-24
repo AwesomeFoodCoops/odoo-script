@@ -48,6 +48,7 @@ print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
 id_journal_CEP = 49
 id_compte_comptable_CEP = 743 # 512210 - CEP Compte courant
 id_journaux_CB0X = [96,95,97,90,91,92]
+compte_comptable_frais_bancaires_CEP = 504 #correspond au compte comptable 627500 Frais Comm /CB
 contact_contract_number = "CONTRAT 8815597     REM 0"
 contactless_contract_number = "CONTRAT 8815598     REM 0"
 pattern_telecollecte="CB LA LOUVE"
@@ -58,7 +59,11 @@ aucune_possibilite = 0
 
 mode_test = True
 
-def delta_day(date, delay_day):
+def delta_day(date):
+    delay_day = 1
+    date_s = datetime.datetime.strptime(date, '%Y-%m-%d')
+    if (date_s.weekday() == 5):
+        delay_day = 2
     date_1 = datetime.datetime.strptime(date, "%Y-%m-%d")
     end_date = date_1 + datetime.timedelta(days=delay_day)
     res = end_date.strftime('%Y-%m-%d')
@@ -71,7 +76,7 @@ def already_reconcilled(move_lines):
 	    return True
     return False
 
-def reconcile_pos(statement_name=None):
+def reconcile_pos(date_debut, date_fin, statement_name=None):
     cas_0 = 0
     cas_1 = 0
     cas_2 = 0
@@ -79,7 +84,7 @@ def reconcile_pos(statement_name=None):
     print ">>>>>>> START UPDATING >>>>>>>>>>"
 
     if statement_name==None:
-        CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-01-01"),('date', '<', "2017-04-30"),('journal_id', 'in', id_journaux_CB0X)],order='id')
+        CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', date_debut),('date', '<', date_fin),('journal_id', 'in', id_journaux_CB0X)],order='id')
     else :
         CB0Xstatements = openerp.AccountBankStatement.browse([('name', '=',statement_name)])
 
@@ -184,40 +189,13 @@ def reconcile_pos(statement_name=None):
                 lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
 
         #quelque soit le cas, générer l'écriture de frais bancaire et la rapprocher
-        for ligne in ligne_banque_cb_rapprochees : 
-            generer_lettrer_frais_bancaires(ligne)
-            pass
+#        for ligne in ligne_banque_cb_rapprochees : 
+#            apairer_et_generer_lettrer_frais_bancaires(ligne)
+#            pass
+
+    directement_generer_lettrer_frais_bancaires_sans_apairer(delta_day(date_debut),delta_day(date_fin))
 
 
-def generer_lettrer_frais_bancaires(transaction_line):
-    print "     > Rapporchement frais bancaires"
-    parse_name = re.compile(u"^CB LA LOUVE          (?P<date>\d{6})$").search(transaction_line.name)
-    parse_note = re.compile(u"^CONTRAT (?P<contract_number>\d{7})     REM (?P<rem>\d{5})$").search(transaction_line.note)
-    name = "*CB COM LA LOUVE "+parse_name.group('date')
-    note = "CONTRAT "+parse_note.group('contract_number')+" REM "+parse_note.group('rem')
-
-    fees_lines = openerp.AccountBankStatementLine.browse([('name','=',name),('note','=',note),('journal_id','=',id_journal_CEP),('journal_entry_ids','=',False)])
-    if len(fees_lines) == 0:
-        print "WARNING Niveau 3 : Aucune ligne de frais trouvée pour cette ligne de télécollecte"
-        return False
-    if len(fees_lines) > 1:
-        print "WARNING Niveau 3 : Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
-        return False
-
-    fees_line = fees_lines[0]
-
-    move_line_data_credit = {
-        'name': 'Frais télécollecte Contrat '+parse_note.group('contract_number')+" REM "+parse_note.group('rem'),
-        'debit': fees_line.amount * -1,
-        'credit': 0.0,
-        'journal_id': id_journal_CEP,
-        'date': fees_line.date,
-        'account_id': 504,#correspond au compte comptable 627500 Frais Comm /CB
-    }
-    print "         -> ligne de banque générée : ", move_line_data_credit
-    if mode_test == False :
-        print fees_line.process_reconciliation_wrapper([move_line_data_credit])
-    return True
 
 def trouver_ligne(date_session,total_amount):
     print "     > Trouver ligne"
@@ -225,13 +203,8 @@ def trouver_ligne(date_session,total_amount):
     global plusieurs_possibilites
     global aucune_possibilite
 
-    delta = 1
-    date_s = datetime.datetime.strptime(date_session, '%Y-%m-%d')
-    if (date_s.weekday() == 5):
-        delta = 2
-
-    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,delta)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
-    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,delta)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
+    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
+    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
 
     print "             Nb contact_line : ", len(contact_lines), " / Nb contactless_line : ", len(contactless_lines), " ==>> ", len(contact_lines)+len(contactless_lines)+len(contact_lines)*len(contactless_lines), "combinaisons à tester."
 
@@ -355,41 +328,103 @@ def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_
             r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
             print r
 
+def directement_generer_lettrer_frais_bancaires_sans_apairer(date_debut,date_fin):
+    print "     > Rapporchement direct frais bancaires sans apairage avec les télecollectes"
+
+    lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',"*CB COM LA LOUVE "+"%"),('journal_entry_ids', '=', False)],offset=0)
+
+    i = 0
+    for line in lines:
+        i = 0+1
+        print "==============================="
+        print " Avancement : ",i, "/",len(lines)
+        print "==============================="
+        print "         name",line.name
+        print "         note",line.note
+        print "         amount",line.amount
+        print "         date",line.date
+
+        parse_name = re.compile(u"^\*CB COM LA LOUVE (?P<date>\d{6})$").search(line.name)
+        parse_note = re.compile(u"^CONTRAT (?P<contract_number>\d{7}) REM (?P<rem>\d{5})$").search(line.note)
+
+        move_line_data_credit = {
+            'name': 'Frais télécollecte Contrat '+parse_note.group('contract_number')+" REM "+parse_note.group('rem')+" du "+parse_name.group('date'),
+            'debit': line.amount * -1,
+            'credit': 0.0,
+            'journal_id': id_journal_CEP,
+            'date': line.date,
+            'account_id': compte_comptable_frais_bancaires_CEP,
+        }
+        print "         -> ligne de banque générée : ", move_line_data_credit
+        if mode_test == False :
+            print fees_line.process_reconciliation_wrapper([move_line_data_credit])
+
+'''
+def apairer_et_generer_lettrer_frais_bancaires(transaction_line):
+    print "     > Rapporchement frais bancaires"
+    parse_name = re.compile(u"^CB LA LOUVE          (?P<date>\d{6})$").search(transaction_line.name)
+    parse_note = re.compile(u"^CONTRAT (?P<contract_number>\d{7})     REM (?P<rem>\d{5})$").search(transaction_line.note)
+    name = "*CB COM LA LOUVE "+parse_name.group('date')
+    note = "CONTRAT "+parse_note.group('contract_number')+" REM "+parse_note.group('rem')
+
+    fees_lines = openerp.AccountBankStatementLine.browse([('name','=',name),('note','=',note),('journal_id','=',id_journal_CEP),('journal_entry_ids','=',False)])
+    if len(fees_lines) == 0:
+        print "         WARNING Niveau 3 : Aucune ligne de frais trouvée pour cette ligne de télécollecte avec ces critères de recherche :"
+        print "             name",name
+        print "             note",note
+        print "             date",parse_name.group('date')
+        return False
+    if len(fees_lines) > 1:
+        print "         WARNING Niveau 3 : Plusieurs lignes de frais trouvées pour cette ligne de télecollecte avec ces critères de recherche :"
+        print "             name",name
+        print "             note",note
+        print "             date",parse_name.group('date')
+        for i in fees_lines:
+            print "         - Possibilité : "
+            print "                 name",i.name
+            print "                 note",i.note
+            print "                 amount",i.amount
+        return False
+
+    fees_line = fees_lines[0]
+
+    move_line_data_credit = {
+        'name': 'Frais télécollecte Contrat '+parse_note.group('contract_number')+" REM "+parse_note.group('rem')+" du "+parse_name.group('date'),
+        'debit': fees_line.amount * -1,
+        'credit': 0.0,
+        'journal_id': id_journal_CEP,
+        'date': fees_line.date,
+        'account_id': compte_comptable_frais_bancaires_CEP,
+    }
+    print "         -> ligne de banque générée : ", move_line_data_credit
+    if mode_test == False :
+        print fees_line.process_reconciliation_wrapper([move_line_data_credit])
+    return True
 
 def generer_toutes_ecritures_frais(date_debut, date_fin):
-    # fonction de test
-    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
-    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
-    print len(contact_lines), len(contactless_lines)
+    # FONCTION DE TEST
+    lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_debut), ('date', '<=', date_fin),('name','=like',pattern_telecollecte+"%"),('journal_entry_ids', '=', False)],offset=0)
     c = 0
     c_ok=0
-    for i in contact_lines:
+    for i in lines:
         print "=============================="
-        print "contact :",c," / ",len(contact_lines)
+        print "contact :",c," / ",len(lines)
         print "     c_ok : ", c_ok, " / ",c
         print "=============================="
-        if generer_lettrer_frais_bancaires(i)==True:
+        print "id", i.id
+        print "date", i.date
+        print "name", i.name
+        print "note", i.note
+        print "amount", i.amount
+        if apairer_et_generer_lettrer_frais_bancaires(i)==True:
             c_ok = c_ok+1
         c = c+1
-    sc=0
-    sc_pk=0
-    for j in contactless_lines:
-        print "=============================="
-        print "contact :",c," / ",len(contact_lines)
-        print "     c_ok : ", c_ok, " / ",c
-        print "sans contact :",sc," / ",len(contactless_lines)
-        print "     sc_ok : ", sc_ok, " / ",sc
-        print "=============================="
-        if generer_lettrer_frais_bancaires(j)==True:
-            sc_ok = sc_ok+1
-        sc = sc+1
- 
+'''
 
-#reconcile_pos()
-#reconcile_pos("CB04/2017/0002")
+#reconcile_pos(date_debut,date_fin)
+#reconcile_pos(None,None,"CB04/2017/0002")
 #trouver_ligne("2017-01-05",142.42)
-
-generer_toutes_ecritures_frais('2017-01-01','2017-04-30')
+directement_generer_lettrer_frais_bancaires_sans_apairer('2017-01-01','2017-04-30')
 
 print "\n>>>>>>> DONE >>>>>>>>>>"
 print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
