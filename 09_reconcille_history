@@ -70,26 +70,34 @@ def already_reconcilled(move_lines):
 	    return True
     return False
 
-def reconcile_pos():
+def reconcile_pos(statement_name=None):
+    cas_0 = 0
     cas_1 = 0
     cas_2 = 0
     total_cas = 0
     print ">>>>>>> START UPDATING >>>>>>>>>>"
-    CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-01-01"),('date', '<', "2017-04-30"),('journal_id', 'in', id_journaux_CB0X)],order='id')
+
+    if statement_name==None:
+        CB0Xstatements = openerp.AccountBankStatement.browse([('date', '>=', "2017-01-01"),('date', '<', "2017-04-30"),('journal_id', 'in', id_journaux_CB0X)],order='id')
+    else :
+        CB0Xstatements = openerp.AccountBankStatement.browse([('name', '=',statement_name)])
 
     for statement in CB0Xstatements:
         print "==========================================="
         print "Avancement : ", total_cas, " / ", len(CB0Xstatements)
+        print "     => Cas 0 : ", cas_0, " / ", total_cas
         print "     => Cas 1 : ", cas_1, " / ", total_cas
         print "     => Cas 2 : ", cas_2, " / ", total_cas
-        print "     => Autres cas non traités : ", total_cas-cas_1-cas_2, " / ", total_cas
+        print "     => Autres cas non traités : ", total_cas-cas_0-cas_1-cas_2, " / ", total_cas
         print "     -> Total_ok : ", total_ok, " / Plusieurs_possibilites : ", plusieurs_possibilites, " / Aucune_possibilite :", aucune_possibilite 
         print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
         total_cas = total_cas + 1
         print "===========================================", statement.name, " / ", statement.date
 
         if len(statement.line_ids)==0:
-            print "     WARNING : session sans ligne de CB"
+            cas_0 = cas_0+1
+            print "CAS 0 : Il existe aucune ligne dans ce relevé CBXX."
+            print "     WARNING Niveau 1 : session sans ligne de CB"
             continue
         pos_session = statement.line_ids[0].ref #on suppose que toutes les lignes d'un relevé on tous le même POS session => automatique dans le POS
         print "POS : ", pos_session
@@ -106,25 +114,38 @@ def reconcile_pos():
         # s'il y a au moins une ligne de relevé POS qui n'a pas d'écriture comptable de banque assoriée. 
         if (len(ecriture_journal_cbXX_lettrees)>0):
             if len(statement.line_ids) != len(ecriture_journal_cbXX_lettrees):
-                print "WARNING : relevé de POS partiellement passé sur le journal de banque. Cas non géré."
+                print "WARNING Niveau 2 : relevé de POS partiellement passé sur le journal de banque. Cas non géré."
             else :
                 cas_1 = cas_1 + 1 
-                print "CAS 1 : Il existe des écritures de débit sur le journal CBXX et elles sont toutes lettrée => lettrage déja fait à la main"
+                print "CAS 1 : Il existe des écritures de débit sur le journal CBXX et elles sont toutes lettrées => lettrage déja fait à la main"
                 ecritures_journal_banque = []
                 ref_lettrage = []
                 for l in ecriture_journal_cbXX_lettrees:
                     if l.full_reconcile_id.id not in ref_lettrage:
                         ref_lettrage.append(l.full_reconcile_id.id)
-
+                print "     -> References de lettrage(", len(ref_lettrage), ") : ",ref_lettrage
+                if len(ref_lettrage) != 1 :
+                    print "         WARNING Niveau 1 : nombre de références de lettrage atypique"
                 for id_reference_lettrage in ref_lettrage:
+                    print "         -> Reference de lettrage courant : ", id_reference_lettrage
                     ecriture_cbXX_liees = openerp.AccountMoveLine.browse([('full_reconcile_id', '=', id_reference_lettrage),('journal_id','=',id_journal_CEP),('debit','=',0),('account_id','=',account_id_debit)])
-                    print "         -> Ecritures (", len(ecriture_cbXX_liees), ") : ", ecriture_cbXX_liees.id
+                    print "         -> Ecritures sur le journal CBXX et le compte CBXX correspondant à cette réf de lettrage(", len(ecriture_cbXX_liees), ") : ", ecriture_cbXX_liees.id
+                    if len(ecriture_cbXX_liees) != 1 :
+                        print "         WARNING Niveau 1 : nombre d'écritures de banque atypique"
+                    pieces_deja_inspectees = []
                     for ecriture_banque in ecriture_cbXX_liees:
-                        print "             -> Ecriture de banque : ", ecriture_banque.id
+                        print "             -> Ecriture journal de banque et compte CBXX lettré avec les écritures de vente (compte CBXX du journal CBXX) : ", ecriture_banque.id
+                        print "                Nombre d'écritures de la pièce de l'écriture :",len(ecriture_banque.move_id.line_ids)
                         for ecriture_journal_banque in ecriture_banque.move_id.line_ids:
                             if ecriture_journal_banque.account_id.id != id_compte_comptable_CEP:
                                 #print "             - Pas compte de banque : ", ecriture_journal_banque.account, ecriture_journal_banque.name, ecriture_journal_banque.id
                                 continue
+                            print "             -> Ecriture journal de banque et compte de banque : ", ecriture_journal_banque.id
+                            print "             -> Numéro de la pièce :", ecriture_journal_banque.move_id.id
+                            if ecriture_journal_banque.move_id.id in pieces_deja_inspectees :
+                                print "                 Cette pièce a déjà été inspectée."
+                                continue
+                            pieces_deja_inspectees.append(ecriture_journal_banque.move_id.id)
                             res = trouver_ligne(ecriture_journal_banque.date,ecriture_journal_banque.debit)
                             if res != False :
                                 res_contact, res_contactless = res
@@ -133,7 +154,7 @@ def reconcile_pos():
                                         continue
                                     #verifier qu'elle est pas déjà rapprochée
                                     if len(ligne_releve.journal_entry_ids):
-                                        print "             WARNING : ligne de relevé de banque (id=",ligne_releve.id, ") déjà en partie ou totalement rapprochée"
+                                        print "             WARNING Niveau 2: ligne de relevé de banque (id=",ligne_releve.id, ") déjà en partie ou totalement rapprochée"
                                     else :
                                         print "         > Rapproché : ligne de relevé de banque id=",ligne_releve.id, " avec écriture du journal de banque id=",ecriture_journal_banque.id
 #                                       ligne_releve.journal_entry_ids = [ecriture_journal_banque]
@@ -149,11 +170,11 @@ def reconcile_pos():
                 res_contact, res_contactless = res
                 if (res_contact != False):
 #                    move_contact = creer_ecriture_banque_et_rapprocher(statement,res_contact,account_id_credit, "CB classique")
-#                    ligne_banque_cb_rapprochees.append(res_contact)
+                    ligne_banque_cb_rapprochees.append(res_contact)
                     pass
                 if (res_contactless != False):
 #                   move_contactless = creer_ecriture_banque_et_rapprocher(statement,res_contactless,account_id_credit, "CB sans contact")
-#                   ligne_banque_cb_rapprochees.append(res_contactless)
+                    ligne_banque_cb_rapprochees.append(res_contactless)
                     pass
 #               lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_debit)
 
@@ -175,7 +196,7 @@ def generer_lettrer_frais_bancaires(statement_date,transaction_line):
         print "Aucune ligne de frais trouvée pour cette ligne de télécollecte"
         return False
     if len(fees_lines) > 1:
-        print "Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
+        print "WARNING Niveau 2 : Plusieurs lignes de frais trouvées pour cette ligne de télecollecte"
     fees_line = fees_lines[0]
 
     move_line_data_credit = {
@@ -195,8 +216,13 @@ def trouver_ligne(date_session,total_amount):
     global plusieurs_possibilites
     global aucune_possibilite
 
-    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,2)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
-    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,2)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
+    delta = 1
+    date_s = datetime.datetime.strptime(date_session, '%Y-%m-%d')
+    if (date_s.weekday() == 5):
+        delta = 2
+
+    contact_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,delta)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contact_contract_number+"%"),('journal_entry_ids', '=', False)])
+    contactless_lines = openerp.AccountBankStatementLine.browse([('journal_id','=',id_journal_CEP),('date', '>', date_session), ('date', '<=', delta_day(date_session,delta)),('name','=like',pattern_telecollecte+"%"), ('note','=like',contactless_contract_number+"%"),('journal_entry_ids', '=', False)])
 
     print "             Nb contact_line : ", len(contact_lines), " / Nb contactless_line : ", len(contactless_lines), " ==>> ", len(contact_lines)+len(contactless_lines)+len(contact_lines)*len(contactless_lines), "combinaisons à tester."
 
@@ -214,7 +240,15 @@ def trouver_ligne(date_session,total_amount):
                     print "             COMBINAISON contact + sans contact"
                 else:
                     plusieurs_possibilites = plusieurs_possibilites + 1
-                    print "             => Impossible d'appairer, il y a plusieurs possibilités A."
+                    print "             => WARNING Niveau 2 : Impossible d'appairer, il y a plusieurs possibilités A."
+                    print "                     - POSSIBILITE 1 :" 
+                    if (res_contact != False):
+                        print "                             CONTACT [id="+str(res_contact.id)+"] : ",res_contact.name, res_contact.note, res_contact.amount
+                    if (res_contactless != False):
+                        print "                             SANS CONTACT [id="+str(res_contactless.id)+"] : ",res_contactless.name, res_contactless.note, res_contactless.amount
+                    print "                     - POSSIBILITE 2 : " 
+                    print "                             CONTACT [id="+str(contact_line.id)+"] : ",contact_line.name, contact_line.note, contact_line.amount
+                    print "                             SANS CONTACT [id="+str(contactless_line.id)+"] : ",contactless_line.name, contactless_line.note, contactless_line.amount
                     return False
     
     for contact_line in contact_lines :
@@ -224,7 +258,14 @@ def trouver_ligne(date_session,total_amount):
                 print "             ATTENTION : session sans télecollecte CB sans contact"
             else:
                 plusieurs_possibilites = plusieurs_possibilites + 1
-                print "             => Impossible d'appairer, il y a plusieurs possibilités B."
+                print "             => WARNING Niveau 2 : Impossible d'appairer, il y a plusieurs possibilités B."
+                print "                     - POSSIBILITE 1 :" 
+                if (res_contact != False):
+                    print "                             CONTACT [id="+str(res_contact.id)+"] : ",res_contact.name, res_contact.note, res_contact.amount
+                if (res_contactless != False):
+                    print "                             SANS CONTACT [id="+str(res_contactless.id)+"] : ",res_contactless.name, res_contactless.note, res_contactless.amount
+                print "                     - POSSIBILITE 2 : " 
+                print "                             CONTACT [id="+str(contact_line.id)+"] : ",contact_line.name, contact_line.note, contact_line.amount
                 return False
 
     for contactless_line in contactless_lines :
@@ -234,13 +275,20 @@ def trouver_ligne(date_session,total_amount):
                 print "             ATTENTION : session sans télecollecte CB classique"
             else:
                 plusieurs_possibilites = plusieurs_possibilites + 1
-                print "             => Impossible d'appairer, il y a plusieurs possibilités C."
+                print "             => WARNING Niveau 2 : Impossible d'appairer, il y a plusieurs possibilités C."
+                print "                     - POSSIBILITE 1 :" 
+                if (res_contact != False):
+                    print "                             CONTACT [id="+str(res_contact.id)+"] : ",res_contact.name, res_contact.note, res_contact.amount
+                if (res_contactless != False):
+                    print "                             SANS CONTACT [id="+str(res_contactless.id)+"] : ",res_contactless.name, res_contactless.note, res_contactless.amount
+                print "                     - POSSIBILITE 2 : " 
+                print "                             SANS CONTACT [id="+str(contactless_line.id)+"] : ",contactless_line.name, contactless_line.note, contactless_line.amount
                 return False
 
 
     if ((res_contact == False) and (res_contactless == False)):
         aucune_possibilite = aucune_possibilite + 1
-        print "             => Impossible de trouver une possibilité : il y a probablement des erreurs dans la ventilation des paiements de cette session de POS."
+        print "             => WARNING Niveau 2 : Impossible de trouver une possibilité -> il y a probablement des erreurs dans la ventilation des paiements de cette session de POS."
         return False
     else :
         total_ok = total_ok + 1
@@ -297,6 +345,7 @@ def lettrage(statement,res_contactless,res_contact,account_id_credit,account_id_
 
 
 reconcile_pos()
+#reconcile_pos("CB04/2017/0089")
 #trouver_ligne("2017-01-05",142.42)
 print "\n>>>>>>> DONE >>>>>>>>>>"
 print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
