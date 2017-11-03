@@ -1,0 +1,178 @@
+#! /usr/bin/env python
+# -*- encoding: utf-8 -*-
+import erppeek
+import sys
+#from config_prod import odoo_configuration_user
+from config_test import odoo_configuration_user
+import datetime
+import re
+
+###############################################################################
+# Odoo Connection
+###############################################################################
+
+
+def init_openerp(url, login, password, database):
+    openerp = erppeek.Client(url)
+    uid = openerp.login(login, password=password, database=database)
+    user = openerp.ResUsers.browse(uid)
+    tz = user.tz
+    return openerp, uid, tz
+
+openerp, uid, tz = init_openerp(
+    odoo_configuration_user['url'],
+    odoo_configuration_user['login'],
+    odoo_configuration_user['password'],
+    odoo_configuration_user['database'])
+
+##################################################################
+##########                  SET LOGGER                  ##########
+##################################################################
+class Logger(object):
+    def __init__(self, filename='Default.log'):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+log_file = 'log_' + datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")+'.log'
+print "stdout = ./"+log_file
+sys.stdout = Logger(log_file)
+print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
+
+###############################################################################
+# Script
+###############################################################################
+
+id_journal_LCR = 103
+id_compte_comptable_LCR = 265 #403000 - Fournisseurs - Effets à payer 
+
+mode_test = True
+
+def delta_day(date,force_delay=None):
+    date_1 = datetime.datetime.strptime(date, "%Y-%m-%d")
+    if force_delay==None :
+        delay_day = 1
+        if (date_1.weekday() == 5):
+            delay_day = 2
+    else :
+            delay_day = force_delay
+    end_date = date_1 + datetime.timedelta(days=delay_day)
+    res = end_date.strftime('%Y-%m-%d')
+    print "date session : ", date
+    print "delay_day : ",delay_day 
+    print "date max : ", res
+    return res
+
+
+def already_reconcilled(move_lines):
+    for move_line in move_lines :
+        if move_line.reconciled:
+	    return True
+    return False
+
+def reconcile_lcr(id_journal_compte_bancaire,id_compte_comptable_compte_bancaire,date_debut, date_fin, id_ligne_releve_banque=None):
+    total_ok = 0
+    plusieurs_possibilites = 0
+    aucune_possibilite = 0
+    total_cas = 0
+    print ">>>>>>> START UPDATING >>>>>>>>>>"
+
+    if id_ligne_releve_banque==None:
+        lignes_lcr = openerp.AccountBankStatementLine.browse([('name', 'like', "LCR %"), ('journal_entry_ids','=',False),('date', '>=', date_debut),('date', '<=', date_fin),('journal_id', '=', id_journal_compte_bancaire)],order='id')
+    else :
+        lignes_lcr = openerp.AccountBankStatementLine.browse([('id', '=',id_ligne_releve_banque),('journal_entry_ids','=',False)])
+
+    print "Nombre de lignes",len(lignes_lcr)
+
+    for ligne_lcr in lignes_lcr:
+        print "==========================================="
+        print "Avancement : ", total_cas, " / ", len(lignes_lcr)
+        print "     -> Total_ok : ", total_ok, " / Plusieurs_possibilites : ", plusieurs_possibilites, " / Aucune_possibilite :", aucune_possibilite 
+        print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
+        total_cas = total_cas + 1
+        print "==========================================="
+
+        if ligne_lcr.name[:4]!="LCR ":
+            #ce n'est pas un LCR
+            continue
+
+        print " => Ligne de relevé bancaire : ",ligne_lcr.name, ligne_lcr.id, ligne_lcr.amount, ligne_lcr.date
+
+        date_min = delta_day(ligne_lcr.date,-10)
+        date_max = delta_day(ligne_lcr.date,10)
+        filters = [('journal_id','=',id_journal_LCR),('credit','=',abs(ligne_lcr.amount)),('account_id','=',id_compte_comptable_LCR),('date', '>=', date_min), ('date', '<=', date_max)]
+        lcr_en_attente = openerp.AccountMoveLine.browse(filters)
+
+        if len(lcr_en_attente)==0:
+            aucune_possibilite = aucune_possibilite+1
+            print "     > CAS 0 : Il existe aucune ligne."
+            continue
+
+        if len(lcr_en_attente)>1:
+            plusieurs_possibilites = plusieurs_possibilites+1
+            print "     > CAS 1 : Il existe plusieurs lignes."
+            continue
+
+        if len(lcr_en_attente)==1:
+            total_ok = total_ok+1
+            print "     > CAS 2 : Il existe exactement un LCR en attente pour ce montant dans la période recherchée."
+            piece_banque = creer_ecriture_banque_et_rapprocher(ligne_lcr,id_compte_comptable_LCR)
+            if mode_test == False :
+                lettrage(ligne_lcr,lcr_en_attente[0],id_compte_comptable_LCR)
+
+
+def creer_ecriture_banque_et_rapprocher(bank_line,id_compte_comptable):
+        move_line_contact = {
+                'name': 'Échéance '+bank_line.name,
+                'debit': abs(bank_line.amount),
+                'credit': 0.0,
+                'journal_id': bank_line.statement_id.journal_id.id,
+                'date': bank_line.date,
+                'account_id': id_compte_comptable,
+                }
+        print move_line_contact
+
+        if mode_test == False :
+            print "     > Création de l'écriture de branque et rapprochement"
+            res = bank_line.process_reconciliation_wrapper([move_line_contact])
+            return res
+
+
+def lettrage(ligne_lcr,ecriture_lcr_en_attente,id_compte_comptable_LCR):
+        print "     > Lettrage"
+        line_to_reconcil = []
+        line_to_reconcil.append(ecriture_lcr_en_attente.id)
+
+        for move_line in ligne_lcr.journal_entry_ids[0].line_ids:
+                if move_line.account_id.id == id_compte_comptable_LCR and move_line.id not in line_to_reconcil:
+                    line_to_reconcil.append(move_line.id)
+
+        print "             ID des écritures comptables à lettrer :",line_to_reconcil
+        wizard_id = 1
+        r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
+        print r
+
+
+
+################################
+
+date_debut = '2017-01-01'
+date_fin = '2017-09-29'
+
+print "############### Transaction LCR sur CEP compte courant"
+id_journal_CEP = 49
+id_compte_comptable_CEP = 743 # 512210 - CEP Compte courant
+reconcile_lcr(id_journal_CEP,id_compte_comptable_CEP,date_debut,date_fin)
+
+print "############### Transaction LCR sur Ccoop compte courant"
+id_journal_Ccoop = 46
+id_compte_comptable_Ccoop = 739 #512110 - CCOOP Compte courant 
+reconcile_lcr(id_journal_Ccoop,id_compte_comptable_Ccoop,date_debut,date_fin)
+
+reconcile_lcr(id_journal_CEP,id_compte_comptable_CEP,None,None,64886)
+
+print "\n>>>>>>> DONE >>>>>>>>>>"
+print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
