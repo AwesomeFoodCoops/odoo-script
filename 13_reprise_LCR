@@ -49,7 +49,7 @@ print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
 id_journal_LCR = 103
 id_compte_comptable_LCR = 265 #403000 - Fournisseurs - Effets à payer 
 
-mode_test = True
+mode_test = False
 
 def delta_day(date,force_delay=None):
     date_1 = datetime.datetime.strptime(date, "%Y-%m-%d")
@@ -101,8 +101,8 @@ def reconcile_lcr(id_journal_compte_bancaire,id_compte_comptable_compte_bancaire
 
         print " => Ligne de relevé bancaire : ",ligne_lcr.name, ligne_lcr.id, ligne_lcr.amount, ligne_lcr.date
 
-        date_min = delta_day(ligne_lcr.date,-10)
-        date_max = delta_day(ligne_lcr.date,10)
+        date_min = delta_day(ligne_lcr.date,-5)
+        date_max = delta_day(ligne_lcr.date,5)
         filters = [('journal_id','=',id_journal_LCR),('credit','=',abs(ligne_lcr.amount)),('account_id','=',id_compte_comptable_LCR),('date', '>=', date_min), ('date', '<=', date_max)]
         lcr_en_attente = openerp.AccountMoveLine.browse(filters)
 
