@@ -53,7 +53,7 @@ mode_test = True
 def lettrage_capilat_nonerse_verse():
     print ">>>>>>> START UPDATING >>>>>>>>>>"
 
-    a_lettrer = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0),('credit','!=',0.0)],order='id')
+    a_lettrer = openerp.AccountMoveLine.browse([('name','!=',"Remboursement de capital"),('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0),('credit','!=',0.0)],order='id')
 
     i = 0
     ok=0
@@ -68,8 +68,10 @@ def lettrage_capilat_nonerse_verse():
         print "          debit_different_credit",debit_different_credit
         print "          ok",ok
         print "==============================="
-        print "         name",ecriture_credit.name
+        print "         libelle de l'écriture",ecriture_credit.name
+        print "         nom de la piece de rattachement",ecriture_credit.move_id.name
         print "         credit",ecriture_credit.credit
+        print "         debit",ecriture_credit.debit
         print "         partner_id",ecriture_credit.partner_id.id, "num coop", ecriture_credit.partner_id.barcode_base
         print "         date",ecriture_credit.date
         i = i+1
@@ -89,20 +91,15 @@ def lettrage_capilat_nonerse_verse():
             print "                  => La facture n'est pas à l'état payé"
             continue
         
-#TODO : exclure toute les factures des partner qui ont demandé le remboursement ou se sont faits remboursés sinon mélange entre les écritures lié à l'achat et au remboursement
-#TODO : les écritures à débit = crédit = 0 doivent être traitées avant de passer ce script
-
-
         line_to_reconcil = [ecriture_credit.id]
         total_credit = ecriture_credit.credit
         total_debit = 0.0
         
-        print ecriture_credit.move_id.name
 
-        ecritures_debit = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('credit','=',0.0),('debit','!=',0.0),('ref','=',ecriture_credit.move_id.name),('partner_id','=',facture.partner_id.id)])
+        ecritures_debit = openerp.AccountMoveLine.browse([('name','!=',"Remboursement de capital"),('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('credit','=',0.0),('debit','!=',0.0),('ref','=',ecriture_credit.move_id.name),('partner_id','=',facture.partner_id.id)])
 
         for ecriture_debit in ecritures_debit:
-            print "Ajout ligne",ecriture_debit.id,ecriture_debit.debit
+            print "             Ajout ligne ID",ecriture_debit.id," / Libelle", ecriture_debit.name," / debit=",ecriture_debit.debit, "/ credit=",ecriture_debit.credit
             total_debit+=ecriture_debit.debit
             line_to_reconcil.append(ecriture_debit.id)
 
