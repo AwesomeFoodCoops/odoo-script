@@ -53,7 +53,7 @@ mode_test = True
 def lettrage_capilat_nonerse_verse():
     print ">>>>>>> START UPDATING >>>>>>>>>>"
 
-    a_lettrer = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0)],order='id')
+    a_lettrer = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0),('credit','!=',0.0)],order='id')
 
     i = 0
     ok=0
@@ -99,7 +99,7 @@ def lettrage_capilat_nonerse_verse():
         
         print ecriture_credit.move_id.name
 
-        ecritures_debit = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('credit','=',0.0),('ref','=',ecriture_credit.move_id.name),('partner_id','=',facture.partner_id.id)])
+        ecritures_debit = openerp.AccountMoveLine.browse([('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('credit','=',0.0),('debit','!=',0.0),('ref','=',ecriture_credit.move_id.name),('partner_id','=',facture.partner_id.id)])
 
         for ecriture_debit in ecritures_debit:
             print "Ajout ligne",ecriture_debit.id,ecriture_debit.debit
