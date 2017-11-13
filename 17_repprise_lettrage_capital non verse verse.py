@@ -50,25 +50,37 @@ id_compte_capital_appele_non_verse = 3 #101200 - Parts A - KSANV
 
 mode_test = True
 
-def lettrage_capilat_nonerse_verse():
+def lettrage_capilat_nonerse_verse(move_line_id=None):
     print ">>>>>>> START UPDATING >>>>>>>>>>"
 
-    a_lettrer = openerp.AccountMoveLine.browse([('name','!=',"Remboursement de capital"),('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0),('credit','!=',0.0)],order='id')
+    ecritures_remboursement_capital = openerp.AccountMoveLine.browse([('name','=',"Remboursement de capital"),('account_id','=',id_compte_capital_appele_non_verse)])
+    partner_ecriture_rem_cap = ecritures_remboursement_capital.id
+    print partner_ecriture_rem_cap
+
+
+    if (move_line_id==None):
+        a_lettrer = openerp.AccountMoveLine.browse([('name','!=',"Remboursement de capital"),('account_id','=',id_compte_capital_appele_non_verse),('full_reconcile_id','=',False),('debit','=',0.0),('credit','!=',0.0)],order='id')
+    else : 
+        a_lettrer = openerp.AccountMoveLine.browse([('id','=',move_line_id)],order='id')
 
     i = 0
     ok=0
     aucune_facture=0
     facture_non_payee=0
     debit_different_credit=0
+    exclusion_remb_cap=0
+    pieces_debit_different_credit=[]
     for ecriture_credit in a_lettrer:
         print "==============================="
         print " Avancement : ",i, "/",len(a_lettrer)
         print "          aucune_facture",aucune_facture
         print "          facture_non_payee",facture_non_payee
+        print "          exclusion_remb_cap",exclusion_remb_cap
         print "          debit_different_credit",debit_different_credit
         print "          ok",ok
         print "==============================="
         print "         libelle de l'écriture",ecriture_credit.name
+        print "         ID de l'écriture",ecriture_credit.id
         print "         nom de la piece de rattachement",ecriture_credit.move_id.name
         print "         credit",ecriture_credit.credit
         print "         debit",ecriture_credit.debit
@@ -91,6 +103,11 @@ def lettrage_capilat_nonerse_verse():
             print "                  => La facture n'est pas à l'état payé"
             continue
         
+        if facture.partner_id.id in partner_ecriture_rem_cap:
+            exclusion_remb_cap += 1
+            print "                 => Ce partner est lié à des écriture 'Remboursement de capital'"
+            continue
+
         line_to_reconcil = [ecriture_credit.id]
         total_credit = ecriture_credit.credit
         total_debit = 0.0
@@ -103,11 +120,13 @@ def lettrage_capilat_nonerse_verse():
             total_debit+=ecriture_debit.debit
             line_to_reconcil.append(ecriture_debit.id)
 
-        if (total_credit-total_debit)>0.000001:
+        if (abs(total_credit-total_debit))>0.000001:
                 print "          Total des debit et credit différents"
                 print "             Total credit",total_credit
                 print "             Total debit",total_debit
                 debit_different_credit += 1
+                pieces_debit_different_credit.append(ecriture_credit.move_id.id)
+                print "             => liste des picèes KO credit different debit",pieces_debit_different_credit
                 continue
 
         print line_to_reconcil
@@ -118,10 +137,14 @@ def lettrage_capilat_nonerse_verse():
             r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
             print r
 
+    print "================================"
+    print "             => liste des picèes KO credit different debit",pieces_debit_different_credit
+    print "             => liste des partenr KO car liés à une écriture remboursement de capital",partner_ecriture_rem_cap
 ################################
 
 
-lettrage_capilat_nonerse_verse()
+lettrage_capilat_nonerse_verse(469241)
+#lettrage_capilat_nonerse_verse()
 
 print "\n>>>>>>> DONE >>>>>>>>>>"
 print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
