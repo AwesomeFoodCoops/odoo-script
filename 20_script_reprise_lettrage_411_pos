@@ -1,0 +1,127 @@
+#! /usr/bin/env python
+# -*- encoding: utf-8 -*-
+import erppeek
+import sys
+#from config_prod import odoo_configuration_user
+from config_test import odoo_configuration_user
+import datetime
+import re
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+###############################################################################
+# Odoo Connection
+###############################################################################
+
+
+def init_openerp(url, login, password, database):
+    openerp = erppeek.Client(url)
+    uid = openerp.login(login, password=password, database=database)
+    user = openerp.ResUsers.browse(uid)
+    tz = user.tz
+    return openerp, uid, tz
+
+openerp, uid, tz = init_openerp(
+    odoo_configuration_user['url'],
+    odoo_configuration_user['login'],
+    odoo_configuration_user['password'],
+    odoo_configuration_user['database'])
+
+##################################################################
+##########                  SET LOGGER                  ##########
+##################################################################
+class Logger(object):
+    def __init__(self, filename='Default.log'):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a")
+
+    def write(self, message):
+        #message = message.decode('utf-8')
+        self.terminal.write(message)
+        self.log.write(message)
+
+log_file = 'log_' + datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")+'.log'
+print "stdout = ./"+log_file
+sys.stdout = Logger(log_file)
+print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
+
+###############################################################################
+# Script
+###############################################################################
+
+id_account_411000 = 277 #411100 Clients - Vtes - Collectif
+
+def reconcile_411_pos():
+    # CAS NON GERES :
+    #   - multi-paiements,
+    #   - écritures de retour (car date de paiement différente de la date de la session) => à lettrer à la main
+    #   - écritures sans partenaires (antérieures à l'ouverture du magasin) => à lettrer globalement sur un compte poubelle
+
+    # PERF
+        # sur les 300 premières ventes : 14:37:15 => 15:02:12 soit 24min57s
+            # 4.99s/vente soit 156h soit 6,5 jours pour traiter les 112687 ventes
+            # 11 "aucune possibilité" soit mois de 4%
+
+    debit_moves = openerp.AccountMoveLine.browse([
+            ('reconciled', '=', False),
+            ('account_id', '=', id_account_411000),
+#            ('ref', 'like', "POS%"),
+            ('partner_id', '!=', None),
+            ('debit', '>', 0),
+            ('credit', '=', 0)],order='id')
+
+    ko_plusieurs_possibilites = 0
+    ko_aucune_possibilite = 0
+    exactement_une_possibilite = 0
+    total_a_lettrer = len(debit_moves)
+    i = 0
+
+    for debit_to_reconcile in debit_moves:
+        i += 1
+        print "============================"
+        print "Avancement : ", i, " / ", total_a_lettrer
+        print "         ko_plusieurs_possibilites = ", ko_plusieurs_possibilites
+        print "         ko_aucune_possibilite = ", ko_aucune_possibilite
+        print "         exactement_une_possibilite = ", exactement_une_possibilite
+        print "     %%%%%%%% "
+        print "     Ecriture de vente (debit 411) : ", debit_to_reconcile.id, debit_to_reconcile.name, debit_to_reconcile.date, debit_to_reconcile.partner_id.name, debit_to_reconcile.debit, debit_to_reconcile.credit, debit_to_reconcile.name, debit_to_reconcile.ref, debit_to_reconcile.account_id.name
+
+        line_to_reconcil = [debit_to_reconcile.id]
+
+        search_critera = [
+            ('reconciled', '=', False),
+            ('account_id', '=', id_account_411000),
+#            ('ref', 'like', "POS%"),
+            ('debit', '=', 0),
+            ('credit', '>', round(debit_to_reconcile.debit-0.01,2)),
+            ('credit', '<', round(debit_to_reconcile.debit+0.01,2)),
+            ('date','=',debit_to_reconcile.date),
+            ('partner_id','=',debit_to_reconcile.partner_id.id)]
+        print "     Criteres de recherche de l'ecriture au crédit ", search_critera
+        credit_candidates = openerp.AccountMoveLine.browse(search_critera,order='id')
+
+        if len(credit_candidates) > 1:
+            ko_plusieurs_possibilites += 1
+            print "     => Plusieurs possibilités"
+            print "     Nombre de lignes de paiement correspondantes : ", len(credit_candidates)
+            for payment_moveline in credit_candidates :
+                print "                 Ecriture de paiement : ", payment_moveline.id, payment_moveline.name, payment_moveline.date, payment_moveline.partner_id.name, payment_moveline.debit, payment_moveline.credit, payment_moveline.name, payment_moveline.ref, payment_moveline.account_id.name
+            continue
+        if len(credit_candidates) == 0 :
+            ko_aucune_possibilite += 1
+            print "     => Aucune possibilité"
+            continue
+        if len(credit_candidates) == 1:
+            exactement_une_possibilite += 1
+            payment_moveline = credit_candidates[0]
+            print "     Ecriture de paiement : ", payment_moveline.id, payment_moveline.name, payment_moveline.date, payment_moveline.partner_id.name, payment_moveline.debit, payment_moveline.credit, payment_moveline.name, payment_moveline.ref, payment_moveline.account_id.name
+            line_to_reconcil.append(payment_moveline.id)
+            print "         ->", len(line_to_reconcil), "lignes à lettrer portant les id : ", line_to_reconcil
+            wizard_id = 1
+            r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
+            print r
+
+reconcile_411_pos()
+
+print "\n>>>>>>> DONE >>>>>>>>>>"
+print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
