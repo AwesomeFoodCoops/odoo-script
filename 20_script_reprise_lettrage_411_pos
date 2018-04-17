@@ -51,9 +51,9 @@ print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
 
 id_account_411000 = 277 #411100 Clients - Vtes - Collectif
 
-def reconcile_411_pos():
+def reconcile_411_pos(date_debut):
     # CAS NON GERES :
-    #   - multi-paiements,
+    #   - plusieurs passagaes en caisse dans la même journée pour un mm membre
     #   - écritures de retour (car date de paiement différente de la date de la session) => à lettrer à la main
     #   - écritures sans partenaires (antérieures à l'ouverture du magasin) => à lettrer globalement sur un compte poubelle
 
@@ -61,8 +61,12 @@ def reconcile_411_pos():
         # sur les 300 premières ventes : 14:37:15 => 15:02:12 soit 24min57s
             # 4.99s/vente soit 156h soit 6,5 jours pour traiter les 112687 ventes
             # 11 "aucune possibilité" soit mois de 4%
+        # sur les 736 premières ventes : 14:37:15 => 15:37:15 => soit 60 minutes
+            # 4,89s/vente soit 6,38 jours pour traiter les 112687 ventes
+            # 23 "aucune possibilité" soit 3.13%
 
     debit_moves = openerp.AccountMoveLine.browse([
+            ('date', '<', date_debut),
             ('reconciled', '=', False),
             ('account_id', '=', id_account_411000),
 #            ('ref', 'like', "POS%"),
@@ -70,6 +74,7 @@ def reconcile_411_pos():
             ('debit', '>', 0),
             ('credit', '=', 0)],order='id')
 
+    ok_plusieurs_possibilites = 0
     ko_plusieurs_possibilites = 0
     ko_aucune_possibilite = 0
     exactement_une_possibilite = 0
@@ -80,8 +85,9 @@ def reconcile_411_pos():
         i += 1
         print "============================"
         print "Avancement : ", i, " / ", total_a_lettrer
-        print "         ko_plusieurs_possibilites = ", ko_plusieurs_possibilites
         print "         ko_aucune_possibilite = ", ko_aucune_possibilite
+        print "         ko_plusieurs_possibilites = ", ko_plusieurs_possibilites
+        print "         ok_plusieurs_possibilites = ", ok_plusieurs_possibilites
         print "         exactement_une_possibilite = ", exactement_une_possibilite
         print "     %%%%%%%% "
         print "     Ecriture de vente (debit 411) : ", debit_to_reconcile.id, debit_to_reconcile.name, debit_to_reconcile.date, debit_to_reconcile.partner_id.name, debit_to_reconcile.debit, debit_to_reconcile.credit, debit_to_reconcile.name, debit_to_reconcile.ref, debit_to_reconcile.account_id.name
@@ -93,24 +99,37 @@ def reconcile_411_pos():
             ('account_id', '=', id_account_411000),
 #            ('ref', 'like', "POS%"),
             ('debit', '=', 0),
-            ('credit', '>', round(debit_to_reconcile.debit-0.01,2)),
-            ('credit', '<', round(debit_to_reconcile.debit+0.01,2)),
+#            ('credit', '>', round(debit_to_reconcile.debit-0.01,2)),
+#            ('credit', '<', round(debit_to_reconcile.debit+0.01,2)),
             ('date','=',debit_to_reconcile.date),
             ('partner_id','=',debit_to_reconcile.partner_id.id)]
         print "     Criteres de recherche de l'ecriture au crédit ", search_critera
         credit_candidates = openerp.AccountMoveLine.browse(search_critera,order='id')
 
         if len(credit_candidates) > 1:
-            ko_plusieurs_possibilites += 1
             print "     => Plusieurs possibilités"
-            print "     Nombre de lignes de paiement correspondantes : ", len(credit_candidates)
+            print "         Nombre de lignes de paiement correspondantes : ", len(credit_candidates)
+            somme_credit = 0.0
             for payment_moveline in credit_candidates :
-                print "                 Ecriture de paiement : ", payment_moveline.id, payment_moveline.name, payment_moveline.date, payment_moveline.partner_id.name, payment_moveline.debit, payment_moveline.credit, payment_moveline.name, payment_moveline.ref, payment_moveline.account_id.name
-            continue
+                somme_credit += payment_moveline.credit
+                line_to_reconcil.append(payment_moveline.id)
+#                print "                 Ecriture de paiement : ", payment_moveline.id, payment_moveline.name, payment_moveline.date, payment_moveline.partner_id.name, payment_moveline.debit, payment_moveline.credit, payment_moveline.name, payment_moveline.ref, payment_moveline.account_id.name
+
+            if (abs(somme_credit-debit_to_reconcile.debit)<0.01): #handle multiple payement for one pos ticket
+                ok_plusieurs_possibilites += 1
+                print "         => Total des lignes de crédit du jour pour ce partner correspond"
+                print "             ->", len(line_to_reconcil), "lignes à lettrer portant les id : ", line_to_reconcil
+                wizard_id = 1
+                r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
+                print r
+            else :
+                ko_plusieurs_possibilites += 1
+                print "     => Total des lignes de crédit du jour pour ce partner au 411 != total debit"
+
         if len(credit_candidates) == 0 :
             ko_aucune_possibilite += 1
             print "     => Aucune possibilité"
-            continue
+
         if len(credit_candidates) == 1:
             exactement_une_possibilite += 1
             payment_moveline = credit_candidates[0]
@@ -121,7 +140,9 @@ def reconcile_411_pos():
             r = openerp.execute_kw('account.move.line.reconcile', 'trans_rec_reconcile_full', [wizard_id], {'context': {'active_ids': line_to_reconcil}})
             print r
 
-reconcile_411_pos()
+#        exit()
+
+reconcile_411_pos('2018-04-17')
 
 print "\n>>>>>>> DONE >>>>>>>>>>"
 print datetime.datetime.now().strftime("%Y-%m-%d %H_%M_%s")
