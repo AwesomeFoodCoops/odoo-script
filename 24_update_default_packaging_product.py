@@ -31,7 +31,7 @@ def update_default_packaging_product():
     for product_template in product_templates:
         package_qty = product_template.seller_ids and\
             product_template.seller_ids[0].package_qty
-        if product_template.default_packaging != package_qty:
+        if product_template.default_packaging != package_qty and package_qty and package_qty > 0:
             product_template.default_packaging = package_qty
     return True
 
